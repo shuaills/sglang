@@ -60,24 +60,16 @@ class KVManager:
 
     def set_bootstrap_server(self, bootstrap_server):
         self.bootstrap_server = bootstrap_server
-
+    
     def calculate_all_token_kv_addresses(self, token_indices: list[int]):
         # Initialize result containers
         addresses_and_len = []
         # Process each layer
         for layer_id in range(len(self.args.kv_data_ptrs)):
-            token_addresses = []
-            token_lengths = []
-
-            # Calculate address and offset for each token in the layer
-            for token_index in token_indices:
-                address = self.args.kv_data_ptrs[layer_id] + token_index * self.args.kv_item_lens[layer_id]
-                length = self.args.kv_item_lens[layer_id]
-                token_addresses.append(address)
-                token_lengths.append(length)
-            addresses_and_len.append((token_addresses, token_lengths))
+            address = self.args.kv_data_ptrs[layer_id]
+            length = self.args.kv_item_lens[layer_id] * len(token_indices)
+            addresses_and_len.append((address, length))
         return addresses_and_len
-
 
 class KVPoll:
     """Status codes for KV operations"""
