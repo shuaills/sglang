@@ -61,37 +61,22 @@ class KVManager:
     def set_bootstrap_server(self, bootstrap_server):
         self.bootstrap_server = bootstrap_server
 
-    def calculate_token_kv_address(self, layer_id: int, token_index: int):
-        # Get base address - KV data pointer for each layer
-        base_address = self.args.kv_data_ptrs[layer_id]
-        # KV data size for each token
-        token_kv_size = self.args.kv_item_lens[layer_id]
-        # Calculate offset based on token index
-        offset = token_kv_size * token_index
-        # Final address = base address + offset
-        token_kv_address = base_address + offset
-        return token_kv_address, offset
-
     def calculate_all_token_kv_addresses(self, token_indices: list[int]):
         # Initialize result containers
-        addresses_by_layer = []
-        offsets_by_layer = []
-        addresses_base_and_len = []
+        addresses_and_len = []
         # Process each layer
         for layer_id in range(len(self.args.kv_data_ptrs)):
             token_addresses = []
-            token_offsets = []
+            token_lengths = []
 
             # Calculate address and offset for each token in the layer
             for token_index in token_indices:
-                address, offset = self.calculate_token_kv_address(layer_id, token_index)
+                address = self.args.kv_data_ptrs[layer_id] + token_index * self.args.kv_item_lens[layer_id]
+                length = self.args.kv_item_lens[layer_id]
                 token_addresses.append(address)
-                token_offsets.append(offset)
-
-            addresses_by_layer.append(token_addresses)
-            offsets_by_layer.append(token_offsets)
-            addresses_base_and_len.append((self.args.kv_data_ptrs[layer_id], token_offsets[-1]))
-        return addresses_by_layer, offsets_by_layer, addresses_base_and_len
+                token_lengths.append(length)
+            addresses_and_len.append((token_addresses, token_lengths))
+        return addresses_and_len
 
 
 class KVPoll:
@@ -189,10 +174,9 @@ class KVSender:
             kv_indices: Array of KV indices to send
         """
         # Calculate addresses and prepare memory regions for transfer
-        result = self.mgr.calculate_all_token_kv_addresses(kv_indices)
-        address_lengths = result[-1]
+        addresses_and_len = self.mgr.calculate_all_token_kv_addresses(kv_indices)
         mrs_info = []
-        for layer_id, (address, length) in enumerate(address_lengths):
+        for (address, length) in addresses_and_len:
             mr = self.qp.create_mr(address, length)
             self.mrs_to_send.append(mr)
             mrs_info.append({
@@ -270,14 +254,11 @@ class KVReceiver:
         metadata_length = self.mgr.aux_item_lens[0]
 
         # Initialize RDMA server and register memory regions
-        result = self.mgr.calculate_all_token_kv_addresses(kv_indices)
-        address_lengths = result[-1]
+        addresses_and_len = self.mgr.calculate_all_token_kv_addresses(kv_indices)
         mrs_info = []
-
-        # Create memory regions for each layer
-        for layer_id, (address, length) in enumerate(address_lengths):
+        for (address, length) in addresses_and_len:
             mr = self.qp.create_mr(address, length)
-            self.mrs_to_receive.append(mr)
+            self.mrs_to_send.append(mr)
             mrs_info.append({
                 "address": address,
                 "length": length,
