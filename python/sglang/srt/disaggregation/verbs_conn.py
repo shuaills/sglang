@@ -250,7 +250,7 @@ class KVReceiver:
         mrs_info = []
         for (address, length) in addresses_and_len:
             mr = self.qp.create_mr(address, length)
-            self.mrs_to_send.append(mr)
+            self.mrs_to_receive.append(mr)
             mrs_info.append({
                 "address": address,
                 "length": length,
