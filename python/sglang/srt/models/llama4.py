@@ -508,6 +508,12 @@ class Llama4Model(nn.Module):
         if len(aux_hidden_states) == 0:
             return hidden_states
 
+        for i, tensor in enumerate(aux_hidden_states):
+            print(f"--- Tensor {i+1} ---")
+            print(f"Shape: {tensor.shape}")
+            print(f"Data Type: {tensor.dtype}")
+            print(f"Device: {tensor.device}")
+
         return hidden_states, aux_hidden_states
 
 
