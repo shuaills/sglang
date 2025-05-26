@@ -528,6 +528,14 @@ class Llama4ForCausalLM(LlamaForCausalLM):
     def get_input_embeddings(self):
         return self.model.embed_tokens
 
+    def set_eagle3_layers_to_capture(self):
+        if not self.pp_group.is_last_rank:
+            return
+
+        self.capture_aux_hidden_states = True
+        num_layers = self.config.num_hidden_layers
+        self.model.layers_to_capture = [2, num_layers // 2, num_layers - 3]
+
     def _init_model(
         self,
         config: Llama4TextConfig,
