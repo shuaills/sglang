@@ -525,6 +525,27 @@ class Llama4ForCausalLM(LlamaForCausalLM):
     ):
         super().__init__(config, quant_config, prefix)
 
+    def set_eagle3_layers_to_capture(self):
+        if not self.pp_group.is_last_rank:
+            return
+
+        self.capture_aux_hidden_states = True
+        num_layers = self.config.num_hidden_layers
+        self.model.layers_to_capture = [2, num_layers // 2, num_layers - 3]
+
+    def set_custom_layers_to_capture(self, layer_indices=None):
+        """手动设置要捕获隐藏状态的层，不依赖于 EAGLE3"""
+        if not self.pp_group.is_last_rank:
+            return
+
+        self.capture_aux_hidden_states = True
+        if layer_indices is None:
+            # 默认捕获几个关键层
+            num_layers = self.config.num_hidden_layers
+            self.model.layers_to_capture = [2, num_layers // 2, num_layers - 3]
+        else:
+            self.model.layers_to_capture = layer_indices
+
     def get_input_embeddings(self):
         return self.model.embed_tokens
 

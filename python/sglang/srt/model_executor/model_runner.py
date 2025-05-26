@@ -314,7 +314,7 @@ class ModelRunner:
             self.model.set_eagle3_layers_to_capture()
 
         # 手动启用辅助隐藏状态捕获（用于调试/研究目的）
-        # 可以通过环境变量控制
+        # 可以通过环境变量控制，支持 Llama 和 Llama4
         if not self.is_draft_worker and (
             self.spec_algorithm.is_eagle3()
             or os.getenv("SGLANG_CAPTURE_AUX_HIDDEN_STATES", "").lower()
