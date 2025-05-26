@@ -343,6 +343,28 @@ class LogitsProcessor(nn.Module):
             full_logits = self._get_logits(hidden_states, lm_head, logits_metadata)
             dump_to_file(self.debug_tensor_dump_output_folder, "logits", full_logits)
 
+        # 保存 aux_hidden_states 到本地
+        if aux_hidden_states is not None:
+            import os
+            import time
+
+            timestamp = int(time.time() * 1000)
+            save_dir = "/tmp/aux_hidden_states"
+            os.makedirs(save_dir, exist_ok=True)
+
+            data = {
+                "input_ids": (
+                    input_ids.cpu() if hasattr(input_ids, "cpu") else input_ids
+                ),
+                "aux_hidden_states": [h.cpu() for h in aux_hidden_states],
+                "timestamp": timestamp,
+                "shapes": [h.shape for h in aux_hidden_states],
+            }
+
+            save_path = f"{save_dir}/aux_{timestamp}.pt"
+            torch.save(data, save_path)
+            print(f"🎯 aux_hidden_states 已保存: {save_path}")
+
         hidden_states_to_store: Optional[torch.Tensor] = None
         if logits_metadata.capture_hidden_mode.need_capture():
             if logits_metadata.capture_hidden_mode.is_full():

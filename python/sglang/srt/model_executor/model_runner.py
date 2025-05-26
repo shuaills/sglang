@@ -313,6 +313,30 @@ class ModelRunner:
         if self.spec_algorithm.is_eagle3() and not self.is_draft_worker:
             self.model.set_eagle3_layers_to_capture()
 
+        # 手动启用辅助隐藏状态捕获（用于调试/研究目的）
+        # 可以通过环境变量控制
+        if not self.is_draft_worker and (
+            self.spec_algorithm.is_eagle3()
+            or os.getenv("SGLANG_CAPTURE_AUX_HIDDEN_STATES", "").lower()
+            in ["true", "1"]
+        ):
+            if hasattr(self.model, "set_custom_layers_to_capture"):
+                # 从环境变量读取要捕获的层
+                layer_indices_str = os.getenv("SGLANG_CAPTURE_LAYER_INDICES", "")
+                if layer_indices_str:
+                    try:
+                        layer_indices = [
+                            int(x.strip()) for x in layer_indices_str.split(",")
+                        ]
+                        self.model.set_custom_layers_to_capture(layer_indices)
+                    except ValueError:
+                        logger.warning(
+                            f"Invalid layer indices: {layer_indices_str}, using default"
+                        )
+                        self.model.set_custom_layers_to_capture()
+                else:
+                    self.model.set_custom_layers_to_capture()
+
     def model_specific_adjustment(self):
         server_args = self.server_args
 
