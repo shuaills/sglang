@@ -525,8 +525,15 @@ class ModelRunner:
         set_cuda_arch()
 
         # Prepare the model config
+        load_format = self.server_args.load_format
+        
+        # Use dummy weights for draft worker if requested
+        if self.is_draft_worker and self.server_args.use_dummy_draft_weights:
+            load_format = "dummy"
+            logger.info(f"Using dummy weights for draft model: {self.model_config.model_path}")
+
         self.load_config = LoadConfig(
-            load_format=self.server_args.load_format,
+            load_format=load_format,
             download_dir=self.server_args.download_dir,
         )
         if self.server_args.load_format == "gguf":

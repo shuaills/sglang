@@ -146,6 +146,7 @@ class ServerArgs:
     speculative_accept_threshold_single: float = 1.0
     speculative_accept_threshold_acc: float = 1.0
     speculative_token_map: Optional[str] = None
+    use_dummy_draft_weights: bool = False
 
     # Double Sparsity
     enable_double_sparsity: bool = False
@@ -1065,6 +1066,11 @@ class ServerArgs:
             type=str,
             help="The path of the draft model's small vocab table.",
             default=ServerArgs.speculative_token_map,
+        )
+        parser.add_argument(
+            "--use-dummy-draft-weights",
+            action="store_true",
+            help="Use dummy weights for draft model (for testing architecture compatibility).",
         )
 
         # Double Sparsity
