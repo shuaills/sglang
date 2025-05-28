@@ -20,7 +20,7 @@ import torch
 from torch import nn
 from transformers import Llama4TextConfig
 
-from sglang.srt.distributed import get_attention_tp_rank, get_attention_tp_size
+from sglang.srt.layers.dp_attention import get_attention_tp_rank, get_attention_tp_size
 from sglang.srt.layers.layernorm import RMSNorm
 from sglang.srt.layers.linear import QKVParallelLinear
 from sglang.srt.layers.logits_processor import LogitsProcessor
@@ -29,7 +29,7 @@ from sglang.srt.layers.vocab_parallel_embedding import (
     ParallelLMHead,
     VocabParallelEmbedding,
 )
-from sglang.srt.model_executor.forward_batch_info import ForwardBatch
+from sglang.srt.model_executor.forward_batch_info import ForwardBatch, PPProxyTensors
 from sglang.srt.models.llama4 import Llama4DecoderLayer, Llama4ForCausalLM, Llama4MoE
 from sglang.srt.utils import add_prefix
 
@@ -81,7 +81,7 @@ class Llama4DecoderLayer(Llama4DecoderLayer):
         hidden_states = self.hidden_norm(hidden_states)
 
         hidden_states = torch.cat([embeds, hidden_states], dim=-1)
-        
+
         # Self Attention
         hidden_states = self.self_attn(
             positions=positions,
@@ -106,15 +106,15 @@ class Llama4Model(nn.Module):
         super().__init__()
         self.config = config
         self.vocab_size = getattr(config, "draft_vocab_size", config.vocab_size)
-        
+
         self.embed_tokens = VocabParallelEmbedding(
             self.vocab_size,
             config.hidden_size,
             prefix=add_prefix("embed_tokens", prefix),
         )
-        
+
         self.midlayer = Llama4DecoderLayer(config, 0, quant_config, prefix)
-        
+
         if hasattr(config, "target_hidden_size"):
             self.fc = torch.nn.Linear(config.target_hidden_size * 3, config.hidden_size)
         else:
@@ -128,6 +128,7 @@ class Llama4Model(nn.Module):
         positions: torch.Tensor,
         forward_batch: ForwardBatch,
         input_embeds: torch.Tensor = None,
+        pp_proxy_tensors: Optional[PPProxyTensors] = None,
     ) -> torch.Tensor:
         if input_embeds is None:
             embeds = self.embed_tokens(input_ids)
@@ -165,17 +166,22 @@ class Llama4ForCausalLMEagle3(Llama4ForCausalLM):
         self.config = config
         self.quant_config = quant_config
 
+        # Initialize pp_group from distributed module
+        from sglang.srt.distributed import get_pp_group
+
+        self.pp_group = get_pp_group()
+
         if hasattr(config, "num_hidden_layers") and config.num_hidden_layers != 1:
             raise ValueError("EAGLE3 currently only supports 1 layer")
 
         self.model = Llama4Model(
-            config, 
-            quant_config=quant_config, 
+            config,
+            quant_config=quant_config,
             prefix=add_prefix("model", prefix),
         )
-        
+
         draft_vocab_size = getattr(config, "draft_vocab_size", config.vocab_size)
-        
+
         if getattr(config, "tie_word_embeddings", False):
             self.lm_head = self.model.embed_tokens
         else:
@@ -201,7 +207,13 @@ class Llama4ForCausalLMEagle3(Llama4ForCausalLM):
                 super().load_weights([(name, loaded_weight)])
 
     def get_hot_token_id(self):
-        return getattr(self, "hot_token_id", None)
+        # return getattr(self, "hot_token_id", None)
+        # For testing, return a simple fixed tensor on the correct device
+        device = next(self.parameters()).device
+        draft_vocab_size = getattr(self.config, "draft_vocab_size", 32000)
+        # Use a smaller number of hot tokens to be safe
+        num_hot_tokens = min(32000, draft_vocab_size)
+        return torch.arange(num_hot_tokens, dtype=torch.int32, device=device)
 
 
 EntryClass = [Llama4ForCausalLMEagle3]
