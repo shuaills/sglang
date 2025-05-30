@@ -185,12 +185,17 @@ class LlamaForCausalLMEagle3(LlamaForCausalLM):
             if "d2t" in name:
                 # d2t stores diffs between draft id and target id
                 self.hot_token_id = loaded_weight + torch.arange(loaded_weight.shape[0])
-
-            if "d2t" not in name and "t2d" not in name and "lm_head" not in name:
+            elif "t2d" not in name and "lm_head" not in name:
+                # For other model weights (not d2t, t2d, or lm_head)
                 new_name = f"model.{name}"
                 super().load_weights([(new_name, loaded_weight)])
             elif "lm_head" in name:
+                # For lm_head weights
                 super().load_weights([(name, loaded_weight)])
+        
+        # Initialize hot_token_id if not set by d2t weights
+        if not hasattr(self, 'hot_token_id'):
+            self.hot_token_id = torch.arange(self.config.draft_vocab_size, dtype=torch.int64)
 
     def get_hot_token_id(self):
         return self.hot_token_id

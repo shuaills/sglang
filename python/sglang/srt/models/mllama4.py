@@ -223,5 +223,34 @@ class Llama4ForConditionalGeneration(nn.Module):
                     )
                     weight_loader(param, loaded_weight)
 
+    def set_eagle3_layers_to_capture(self):
+        """Delegate EAGLE3 layer capture setup to the language_model."""
+        if hasattr(self.language_model, "set_eagle3_layers_to_capture"):
+            self.language_model.set_eagle3_layers_to_capture()
+
+    def get_embed_and_head(self):
+        """Delegate get_embed_and_head to the language_model for EAGLE3 support."""
+        if hasattr(self.language_model, "get_embed_and_head"):
+            return self.language_model.get_embed_and_head()
+        else:
+            # Fallback: return embed_tokens and lm_head directly
+            return (
+                self.language_model.model.embed_tokens.weight,
+                self.language_model.lm_head.weight,
+            )
+
+    def set_embed_and_head(self, embed, head):
+        """Delegate set_embed_and_head to the language_model for EAGLE3 support."""
+        if hasattr(self.language_model, "set_embed_and_head"):
+            self.language_model.set_embed_and_head(embed, head)
+        else:
+            # Fallback: set embed_tokens and lm_head directly
+            del self.language_model.model.embed_tokens.weight
+            del self.language_model.lm_head.weight
+            self.language_model.model.embed_tokens.weight = embed
+            self.language_model.lm_head.weight = head
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+
 
 EntryClass = Llama4ForConditionalGeneration
