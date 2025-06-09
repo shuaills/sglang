@@ -295,6 +295,7 @@ def add_common_other_args_and_parse(parser: argparse.ArgumentParser):
         "--model-path", type=str, default="meta-llama/Llama-2-7b-chat-hf"
     )
     parser.add_argument("--result-file", type=str, default="result.jsonl")
+    parser.add_argument("--is-chat-model", type=bool, action="store_true")
     args = parser.parse_args()
 
     if args.port is None:
@@ -343,9 +344,9 @@ def select_sglang_backend(args: argparse.Namespace):
     if args.backend.startswith("srt"):
         if args.backend == "srt-no-parallel":
             global_config.enable_parallel_encoding = False
-        backend = RuntimeEndpoint(f"{args.host}:{args.port}")
+        backend = RuntimeEndpoint(f"{args.host}:{args.port}", is_chat_model=args.is_chat_model)
     elif args.backend.startswith("gpt-"):
-        backend = OpenAI(args.backend)
+        backend = OpenAI(args.backend, is_chat_model=args.is_chat_model)
     else:
         raise ValueError(f"Invalid backend: {args.backend}")
     return backend

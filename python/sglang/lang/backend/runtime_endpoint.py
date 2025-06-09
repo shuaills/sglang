@@ -29,6 +29,7 @@ class RuntimeEndpoint(BaseBackend):
         api_key: Optional[str] = None,
         verify: Optional[str] = None,
         chat_template_name: Optional[str] = None,
+        is_chat_model: Optional[bool] = False
     ):
         super().__init__()
         self.support_concate_and_append = True
@@ -36,6 +37,8 @@ class RuntimeEndpoint(BaseBackend):
         self.base_url = base_url
         self.api_key = api_key
         self.verify = verify
+        self.is_chat_model = is_chat_model
+        self.endpoint = "/generate" if not self.is_chat_model else "/v1/chat/completions"
 
         res = http_request(
             self.base_url + "/get_model_info",
@@ -78,7 +81,7 @@ class RuntimeEndpoint(BaseBackend):
 
     def cache_prefix(self, prefix_str: str):
         res = http_request(
-            self.base_url + "/generate",
+            self.base_url + self.endpoint,
             json={"text": prefix_str, "sampling_params": {"max_new_tokens": 0}},
             api_key=self.api_key,
             verify=self.verify,
@@ -89,7 +92,7 @@ class RuntimeEndpoint(BaseBackend):
         data = {"text": s.text_, "sampling_params": {"max_new_tokens": 0}}
         self._add_images(s, data)
         res = http_request(
-            self.base_url + "/generate",
+            self.base_url + self.endpoint,
             json=data,
             api_key=self.api_key,
             verify=self.verify,
@@ -100,7 +103,7 @@ class RuntimeEndpoint(BaseBackend):
         data = {"text": s.text_, "sampling_params": {"max_new_tokens": 0}}
         self._add_images(s, data)
         res = http_request(
-            self.base_url + "/generate",
+            self.base_url + self.endpoint,
             json=data,
             api_key=self.api_key,
             verify=self.verify,
@@ -167,7 +170,7 @@ class RuntimeEndpoint(BaseBackend):
         self._add_images(s, data)
 
         res = http_request(
-            self.base_url + "/generate",
+            self.base_url + self.endpoint,
             json=data,
             api_key=self.api_key,
             verify=self.verify,
@@ -208,7 +211,7 @@ class RuntimeEndpoint(BaseBackend):
         self._add_images(s, data)
 
         res = http_request(
-            self.base_url + "/generate",
+            self.base_url + self.endpoint,
             json=data,
             stream=True,
             api_key=self.api_key,
@@ -309,7 +312,7 @@ class RuntimeEndpoint(BaseBackend):
     def _generate_http_request(self, s: StreamExecutor, data):
         self._add_images(s, data)
         res = http_request(
-            self.base_url + "/generate",
+            self.base_url + self.endpoint,
             json=data,
             api_key=self.api_key,
             verify=self.verify,
