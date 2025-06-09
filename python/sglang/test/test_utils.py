@@ -295,7 +295,6 @@ def add_common_other_args_and_parse(parser: argparse.ArgumentParser):
         "--model-path", type=str, default="meta-llama/Llama-2-7b-chat-hf"
     )
     parser.add_argument("--result-file", type=str, default="result.jsonl")
-    parser.add_argument("--is-chat-model", type=bool, action="store_true")
     args = parser.parse_args()
 
     if args.port is None:
@@ -335,6 +334,7 @@ def add_common_sglang_args_and_parse(parser: argparse.ArgumentParser):
         help="Device type (auto/cuda/rocm/cpu). Auto will detect available platforms",
     )
     parser.add_argument("--result-file", type=str, default="result.jsonl")
+    parser.add_argument("--is-chat-model", action="store_true", help="Whether the model is a chat model")
     args = parser.parse_args()
 
     return args
