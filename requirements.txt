@@ -1,0 +1,8 @@
+pre-commit
+torch
+transformers
+datasets
+setuptools
+deepspeed
+omegaconf
+tqdm
