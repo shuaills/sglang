@@ -712,13 +712,16 @@ class CudaGraphRunner:
 
         output = self.output_buffers[self.bs]
         if isinstance(output, LogitsProcessorOutput):
+            hidden = None
+            if output.hidden_states is not None:
+                if isinstance(output.hidden_states, list):
+                    hidden = [h[: self.raw_num_token] for h in output.hidden_states]
+                else:
+                    hidden = output.hidden_states[: self.raw_num_token]
             return LogitsProcessorOutput(
                 next_token_logits=output.next_token_logits[: self.raw_num_token],
-                hidden_states=(
-                    output.hidden_states[: self.raw_num_token]
-                    if output.hidden_states is not None
-                    else None
-                ),
+                hidden_states=hidden,
+                hidden_state_layers=output.hidden_state_layers,
             )
         else:
             assert isinstance(output, PPProxyTensors)

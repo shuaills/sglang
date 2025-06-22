@@ -215,6 +215,7 @@ class ServerArgs:
     disable_chunked_prefix_cache: bool = False
     disable_fast_image_processor: bool = False
     enable_return_hidden_states: bool = False
+    hidden_state_layers: Optional[str] = None
     warmups: Optional[str] = None
 
     # Debug tensor dumps
@@ -257,6 +258,11 @@ class ServerArgs:
 
         if self.random_seed is None:
             self.random_seed = random.randint(0, 1 << 30)
+
+        if isinstance(self.hidden_state_layers, str) and self.hidden_state_layers:
+            self.hidden_state_layers = [
+                int(x) for x in self.hidden_state_layers.split(",")
+            ]
 
         gpu_mem = get_device_memory_capacity(self.device)
 
@@ -1485,6 +1491,12 @@ class ServerArgs:
             "--enable-return-hidden-states",
             action="store_true",
             help="Enable returning hidden states with responses.",
+        )
+        parser.add_argument(
+            "--hidden-state-layers",
+            type=str,
+            default=ServerArgs.hidden_state_layers,
+            help="Comma-separated list of layer indices to capture in hidden state outputs.",
         )
         parser.add_argument(
             "--warmups",

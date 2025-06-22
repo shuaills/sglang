@@ -134,6 +134,38 @@ class TestHiddenState(CustomTestCase):
                 len(output_completion_last_round["meta_info"]["hidden_states"]), 8
             )
 
+    def test_custom_hidden_state_layers(self):
+        prompts = ["Test"]
+        model_path = DEFAULT_SMALL_MODEL_NAME_FOR_TEST
+        tokenizer = AutoTokenizer.from_pretrained(model_path)
+        input_ids = tokenizer(prompts).input_ids
+
+        sampling_params = {
+            "temperature": 0,
+            "max_new_tokens": 4,
+        }
+
+        layers = [0, 1, 2]
+        engine = sgl.Engine(
+            model_path=model_path,
+            random_seed=42,
+            skip_tokenizer_init=True,
+            enable_return_hidden_states=True,
+            hidden_state_layers=",".join(str(x) for x in layers),
+        )
+        outputs = engine.generate(
+            input_ids=input_ids,
+            sampling_params=sampling_params,
+            return_hidden_states=True,
+        )
+        engine.shutdown()
+
+        from transformers import AutoConfig
+
+        hidden_size = AutoConfig.from_pretrained(model_path).hidden_size
+        out_vec = outputs[0]["meta_info"]["hidden_states"][0]
+        self.assertEqual(len(out_vec), hidden_size * len(layers))
+
 
 if __name__ == "__main__":
     unittest.main()

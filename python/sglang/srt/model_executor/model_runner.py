@@ -298,6 +298,10 @@ class ModelRunner:
         # auxiliary hidden capture mode. TODO: expose this to server args?
         if self.spec_algorithm.is_eagle3() and not self.is_draft_worker:
             self.model.set_eagle3_layers_to_capture()
+        if self.server_args.hidden_state_layers:
+            self.model.set_hidden_layers_to_capture(
+                self.server_args.hidden_state_layers
+            )
 
     def model_specific_adjustment(self):
         server_args = self.server_args

@@ -5,6 +5,8 @@ import threading
 import time
 from typing import TYPE_CHECKING, List, Optional, Tuple, Union
 
+import torch
+
 from sglang.srt.disaggregation.utils import DisaggregationMode
 from sglang.srt.layers.logits_processor import LogitsProcessorOutput
 from sglang.srt.managers.io_struct import BatchEmbeddingOut, BatchTokenIDOut
@@ -113,8 +115,13 @@ class SchedulerOutputProcessorMixin:
                         req.return_hidden_states
                         and logits_output.hidden_states is not None
                     ):
+                        hidden_tensor = (
+                            torch.cat(logits_output.hidden_states, dim=-1)
+                            if isinstance(logits_output.hidden_states, list)
+                            else logits_output.hidden_states
+                        )
                         req.hidden_states.append(
-                            logits_output.hidden_states[
+                            hidden_tensor[
                                 hidden_state_offset : (
                                     hidden_state_offset := hidden_state_offset
                                     + len(req.origin_input_ids)
@@ -258,9 +265,12 @@ class SchedulerOutputProcessorMixin:
                     )
 
             if req.return_hidden_states and logits_output.hidden_states is not None:
-                req.hidden_states.append(
-                    logits_output.hidden_states[i].cpu().clone().tolist()
+                hidden_tensor = (
+                    torch.cat(logits_output.hidden_states, dim=-1)
+                    if isinstance(logits_output.hidden_states, list)
+                    else logits_output.hidden_states
                 )
+                req.hidden_states.append(hidden_tensor[i].cpu().clone().tolist())
 
             if req.grammar is not None and batch.spec_algorithm.is_none():
                 req.grammar.accept_token(next_token_id)

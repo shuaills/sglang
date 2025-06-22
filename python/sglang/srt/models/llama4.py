@@ -525,6 +525,12 @@ class Llama4ForCausalLM(LlamaForCausalLM):
     ):
         super().__init__(config, quant_config, prefix)
 
+    def set_hidden_layers_to_capture(self, layers: List[int]):
+        if not self.pp_group.is_last_rank:
+            return
+        self.capture_aux_hidden_states = bool(layers)
+        self.model.layers_to_capture = layers
+
     def get_input_embeddings(self):
         return self.model.embed_tokens
 

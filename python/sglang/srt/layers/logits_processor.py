@@ -53,8 +53,10 @@ class LogitsProcessorOutput:
     # The logits of the next tokens.       shape: [#seq, vocab_size]
     next_token_logits: torch.Tensor
     # Used by speculative decoding (EAGLE)
-    # The last hidden layers
-    hidden_states: Optional[torch.Tensor] = None
+    # The last hidden layers. Can be concatenated tensor or a list of tensors
+    hidden_states: Optional[Union[torch.Tensor, List[torch.Tensor]]] = None
+    # The indices of layers captured in `hidden_states`
+    hidden_state_layers: Optional[List[int]] = None
 
     ## Part 2: This part will be assigned in python/sglang/srt/layers/sampler.py::Sampler
     # The logprobs of the next tokens.                              shape: [#seq]
@@ -363,6 +365,9 @@ class LogitsProcessor(nn.Module):
             return LogitsProcessorOutput(
                 next_token_logits=sampled_logits,
                 hidden_states=hidden_states_to_store,
+                hidden_state_layers=global_server_args_dict.get(
+                    "hidden_state_layers", None
+                ),
             )
         else:
             input_logprobs = logits[input_logprob_indices]
@@ -416,6 +421,9 @@ class LogitsProcessor(nn.Module):
                 input_top_logprobs_val=input_top_logprobs_val,
                 input_top_logprobs_idx=input_top_logprobs_idx,
                 hidden_states=hidden_states_to_store,
+                hidden_state_layers=global_server_args_dict.get(
+                    "hidden_state_layers", None
+                ),
                 input_token_ids_logprobs_val=input_token_ids_logprobs_val,
                 input_token_ids_logprobs_idx=input_token_ids_logprobs_idx,
             )

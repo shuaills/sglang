@@ -705,6 +705,12 @@ class LlamaForCausalLM(nn.Module):
         num_layers = self.config.num_hidden_layers
         self.model.layers_to_capture = [2, num_layers // 2, num_layers - 3]
 
+    def set_hidden_layers_to_capture(self, layers: List[int]):
+        if not self.pp_group.is_last_rank:
+            return
+        self.capture_aux_hidden_states = bool(layers)
+        self.model.layers_to_capture = layers
+
 
 class Phi3ForCausalLM(LlamaForCausalLM):
     pass
