@@ -212,6 +212,8 @@ class EagleRunner:
 
 
 class EagleTrainer(ABC):
+    def __init__(self, draft_model_path) -> None:
+        self.draft_model = AutoModelForCausalLM.from_pretrained(draft_model_path)
 
     def __init__(self, draft_model_path):
         self.draft_model = AutoModelForCausalLM.from_pretrained(
@@ -229,6 +231,9 @@ class OnlineEagleTrainer(EagleRunner):
 
 
 class OfflineEagleTrainer(EagleTrainer):
+    def __init__(self, draft_model, tokenizer):
+        self.draft_model = draft_model
+        self.tokenizer = tokenizer
 
     def step(
         self,
