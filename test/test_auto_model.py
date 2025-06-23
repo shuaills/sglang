@@ -9,6 +9,10 @@ class TestAutoModelForCausalLM(unittest.TestCase):
         model = AutoModelForCausalLM.from_pretrained("nvidia/Llama-4-Maverick-17B-128E-Eagle3")
         self.assertIsInstance(model, LlamaForCausalLMEagle3)
 
+        model = AutoModelForCausalLM.from_pretrained("jamesliu1/sglang-EAGLE3-Llama-3.1-Instruct-8B")
+        self.assertIsInstance(model, LlamaForCausalLMEagle3)
+                                                     
+
 if __name__ == '__main__':
     # 创建测试套件
     suite = unittest.TestSuite()
