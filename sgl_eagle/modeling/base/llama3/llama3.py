@@ -15,6 +15,7 @@ from transformers import LlamaConfig
 
 # [MODIFIED] Import from transformer library
 from transformers.activations import ACT2FN
+from transformers.cache_utils import Cache, DynamicCache
 from transformers.modeling_outputs import (
     BaseModelOutputWithPast,
     CausalLMOutputWithPast,
@@ -590,9 +591,10 @@ class LlamaAttention(nn.Module):
 
     """
 
-    def __init__(self, config: LlamaConfig):
+    def __init__(self, config: LlamaConfig, layer_idx: int):
         super().__init__()
         self.config = config
+        self.layer_idx = layer_idx
         self.hidden_size = config.hidden_size
         self.num_heads = config.num_attention_heads
         self.head_dim = self.hidden_size // self.num_heads
@@ -713,8 +715,7 @@ class LlamaAttention(nn.Module):
         ).transpose(1, 2)
 
         kv_seq_len = key_states.shape[-2]
-        if past_key_value is not None:
-            kv_seq_len += past_key_value[0].shape[-2]
+
         if isinstance(self.rotary_emb, LlamaRotaryEmbedding_L31):
             cos, sin = self.rotary_emb(query_states, position_ids)
             query_states, key_states = apply_rotary_pos_emb_L31(
@@ -730,10 +731,9 @@ class LlamaAttention(nn.Module):
         # past_key_value is utilized to leverage previously computed key and value states.
         # If past_key_value is available, reuse the states for k, v, and self_attention.
         if past_key_value is not None:
-            key_states = past_key_value[0].cat(key_states, dim=2)
-            value_states = past_key_value[1].cat(value_states, dim=2)
-        # Reset past_key_value to avoid return past_key_value.
-        past_key_value = None
+            key_states, value_states = past_key_value.update(
+                key_states, value_states, self.layer_idx
+            )
 
         # repeat k/v heads if n_kv_heads < n_heads
         key_states = repeat_kv(key_states, self.num_key_value_groups)
@@ -1272,7 +1272,7 @@ class LlamaForCausalLM(LlamaPreTrainedModel):
         input_ids: torch.LongTensor = None,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
-        past_key_values=None,  # [MODIFIED] past_key_value is KVCache class
+        past_key_values: Optional[Cache] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         labels: Optional[torch.LongTensor] = None,
         use_cache: Optional[bool] = None,

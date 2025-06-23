@@ -1,3 +1,4 @@
+import logging
 import math
 from typing import List, Optional, Tuple
 
@@ -6,6 +7,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers import GenerationMixin, PreTrainedModel
 from transformers.activations import ACT2FN
+
+from ..utils import padding
+
+logger = logging.getLogger(__name__)
 
 
 # Copied from transformers.models.bart.modeling_bart._make_causal_mask
@@ -317,11 +322,6 @@ class LlamaAttention(nn.Module):
         key_states = self.k_proj(hidden_states)
         value_states = self.v_proj(hidden_states)
 
-        lck = len(cache_hidden[0])
-
-        # cache_k = [self.k_proj(hidden) for hidden in cache_hidden]
-        # cache_v = [self.v_proj(hidden) for hidden in cache_hidden]
-
         query_states = query_states.view(
             bsz, q_len, self.num_heads, self.head_dim
         ).transpose(1, 2)
@@ -332,56 +332,80 @@ class LlamaAttention(nn.Module):
             bsz, q_len, self.num_key_value_heads, self.head_dim
         ).transpose(1, 2)
 
-        cos, sin = self.rotary_emb(query_states, seq_len=q_len + lck)
-        cos, sin = cos.to(query_states.device), sin.to(query_states.device)
-        # query_states = apply_rotary_pos_emb(query_states, cos, sin, position_ids)
-        query_states, key_states = apply_rotary_pos_emb(
-            query_states, key_states, cos, sin, position_ids + lck
-        )
+        if cache_hidden is None:
+            # 使用 SDPA 的标准因果注意力机制
+            cos, sin = self.rotary_emb(query_states, seq_len=q_len)
+            cos, sin = cos.to(query_states.device), sin.to(query_states.device)
+            query_states, key_states = apply_rotary_pos_emb(
+                query_states, key_states, cos, sin, position_ids
+            )
 
-        key_states = repeat_kv(key_states, self.num_key_value_groups)
-        value_states = repeat_kv(value_states, self.num_key_value_groups)
+            key_states = repeat_kv(key_states, self.num_key_value_groups)
+            value_states = repeat_kv(value_states, self.num_key_value_groups)
 
-        cache_hidden[0] = cache_hidden[0] + [key_states]
-        cache_hidden[1] = cache_hidden[1] + [value_states]
+            # 使用 SDPA
+            attn_output = torch.nn.functional.scaled_dot_product_attention(
+                query_states,
+                key_states,
+                value_states,
+                attn_mask=attention_mask,
+                is_causal=attention_mask is None,  # 如果没有提供mask，使用因果mask
+                dropout_p=0.0,
+            )
 
-        cache_k = cache_hidden[0]
-        cache_v = cache_hidden[1]
+        else:
+            # 使用缓存的注意力机制（你原来的逻辑）
+            lck = len(cache_hidden[0])
 
-        k0 = cache_k[0]
-        v0 = cache_v[0]
+            cos, sin = self.rotary_emb(query_states, seq_len=q_len + lck)
+            cos, sin = cos.to(query_states.device), sin.to(query_states.device)
+            query_states, key_states = apply_rotary_pos_emb(
+                query_states, key_states, cos, sin, position_ids + lck
+            )
 
-        # causal
-        attn_weights = torch.matmul(query_states, k0.transpose(2, 3)) / math.sqrt(
-            self.head_dim
-        )
-        lck = len(cache_k)
+            key_states = repeat_kv(key_states, self.num_key_value_groups)
+            value_states = repeat_kv(value_states, self.num_key_value_groups)
 
-        attn_weights = attn_weights + attention_mask
+            cache_hidden[0] = cache_hidden[0] + [key_states]
+            cache_hidden[1] = cache_hidden[1] + [value_states]
 
-        min_value = torch.finfo(attention_mask.dtype).min
-        for i in range(1, lck):
-            ki = cache_k[i]
+            cache_k = cache_hidden[0]
+            cache_v = cache_hidden[1]
 
-            qi = query_states
-            kiq = ki
+            k0 = cache_k[0]
+            v0 = cache_v[0]
 
-            attn_weightsi = (qi * kiq).sum(-1) / math.sqrt(self.head_dim)
-            attn_weights = torch.cat((attn_weights, attn_weightsi[..., None]), dim=-1)
+            # causal
+            attn_weights = torch.matmul(query_states, k0.transpose(2, 3)) / math.sqrt(
+                self.head_dim
+            )
+            lck = len(cache_k)
 
-        # upcast attention to fp32
-        attn_weights = nn.functional.softmax(
-            attn_weights, dim=-1, dtype=torch.float32
-        ).to(query_states.dtype)
-        attn_weights0 = attn_weights[..., :q_len]
+            attn_weights = attn_weights + attention_mask
 
-        attn_output = torch.matmul(attn_weights0, v0)
+            for i in range(1, lck):
+                ki = cache_k[i]
+                qi = query_states
+                kiq = ki
 
-        for i in range(1, lck):
-            vi = cache_v[i]
-            attn_weightsi = attn_weights[..., q_len + i - 1]
-            attn_outputi = attn_weightsi[..., None] * vi
-            attn_output = attn_output + attn_outputi
+                attn_weightsi = (qi * kiq).sum(-1) / math.sqrt(self.head_dim)
+                attn_weights = torch.cat(
+                    (attn_weights, attn_weightsi[..., None]), dim=-1
+                )
+
+            # upcast attention to fp32
+            attn_weights = nn.functional.softmax(
+                attn_weights, dim=-1, dtype=torch.float32
+            ).to(query_states.dtype)
+            attn_weights0 = attn_weights[..., :q_len]
+
+            attn_output = torch.matmul(attn_weights0, v0)
+
+            for i in range(1, lck):
+                vi = cache_v[i]
+                attn_weightsi = attn_weights[..., q_len + i - 1]
+                attn_outputi = attn_weightsi[..., None] * vi
+                attn_output = attn_output + attn_outputi
 
         attn_output = attn_output.transpose(1, 2).contiguous()
         attn_output = attn_output.reshape(bsz, q_len, self.hidden_size)
@@ -394,7 +418,6 @@ class LlamaAttention(nn.Module):
 class LlamaMLP(nn.Module):
     def __init__(self, config, last=True):
         super().__init__()
-        self.last = last
         self.config = config
         self.hidden_size = config.hidden_size
         self.intermediate_size = config.intermediate_size
@@ -457,13 +480,12 @@ class LlamaRMSNorm(nn.Module):
         return self.weight * hidden_states.to(input_dtype)
 
 
-class LlamaForCausalLMEagle3(GenerationMixin, PreTrainedModel):
+class LlamaDecoderLayer(nn.Module):
     def __init__(self, config, last=True):
-        super().__init__(config)
+        super().__init__()
         self.hidden_size = config.hidden_size
         self.self_attn = LlamaAttention(config=config)
         self.mlp = LlamaMLP(config, last=last)
-        self.last = last
         # self.fc = nn.Linear(config.hidden_size * 2, config.hidden_size)
         self.hidden_norm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.input_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
@@ -477,7 +499,7 @@ class LlamaForCausalLMEagle3(GenerationMixin, PreTrainedModel):
         self,
         input_emb: torch.Tensor,
         hidden_states: torch.Tensor,
-        cache_hidden: [List[torch.Tensor]] = [],
+        cache_hidden: List[List[torch.Tensor]] = [],
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         past_key_value: Optional[Tuple[torch.Tensor]] = None,
@@ -509,8 +531,6 @@ class LlamaForCausalLMEagle3(GenerationMixin, PreTrainedModel):
 
         return_hidden = hidden_states
 
-        # cache_hidden.append(hidden_states)
-
         # Self Attention
         hidden_states = self.self_attn(
             cache_hidden=cache_hidden,
@@ -524,23 +544,86 @@ class LlamaForCausalLMEagle3(GenerationMixin, PreTrainedModel):
         hidden_states = residual + hidden_states
 
         # Fully Connected
-        # if self.last:
         residual = hidden_states
-        # else:
-        #     residual = hidden_states.repeat(1, 1, 2)
         hidden_states = self.post_attention_layernorm(hidden_states)
         hidden_states = self.mlp(hidden_states)
         hidden_states = residual + hidden_states
 
-        outputs = (hidden_states, return_hidden)
+        # outputs = (hidden_states, return_hidden)
 
-        # if output_attentions:
-        #     outputs += (self_attn_weights,)
-        #
-        # if use_cache:
-        #     outputs += (present_key_value,)
+        return hidden_states
 
-        return outputs
+
+class LlamaForCausalLMEagle3(PreTrainedModel):
+    def __init__(self, config, quant_config=None) -> None:
+        super().__init__(config)
+        self.config = config
+        self.quant_config = quant_config
+
+        self.vocab_size = config.vocab_size
+        self.midlayer = LlamaDecoderLayer(config)
+
+        if hasattr(config, "target_hidden_size"):
+            self.fc = torch.nn.Linear(
+                config.target_hidden_size * 3, config.hidden_size, bias=False
+            )
+        else:
+            self.fc = torch.nn.Linear(
+                config.hidden_size * 3, config.hidden_size, bias=False
+            )
+
+        self.norm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+
+        self.lm_head = nn.Linear(
+            config.hidden_size, config.draft_vocab_size, bias=False
+        )
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        inputs_embeds: torch.Tensor,
+        attention_mask: torch.Tensor,
+        ttt_length: int = 1,
+    ):
+        """
+        Arguments:
+            hidden_states (`torch.FloatTensor`): input to the layer, cat low, mid high hidden_states of shape `(batch, seq_len, hidden_states * 3)`
+            input_ids (`torch.LongTensor`): input ids of shape `(batch, seq_len)`
+            attention_mask (`torch.FloatTensor`): attention mask of size
+                `(batch, 1, tgt_len, src_len)` where padding elements are indicated by very large negative values.
+            position_ids (`torch.LongTensor`, *optional*): position ids of shape `(batch, seq_len)`
+        """
+        if ttt_length == 1:
+            logger.info("using ttt_length 1, no need to cache hidden states")
+            cache_hidden = None
+        else:
+            logger.info(f"using ttt_length {ttt_length}, caching hidden states")
+            cache_hidden = [[], []]
+
+        batch_size, seq_length, _ = hidden_states.size()
+
+        # make position ids
+        device = hidden_states.device
+        position_ids = torch.arange(0, seq_length, dtype=torch.long, device=device)
+        position_ids = position_ids.unsqueeze(0).view(-1, seq_length)
+
+        # fc
+        hidden_states = self.fc(hidden_states)
+        hidden_states = self.midlayer(
+            input_emb=inputs_embeds,
+            hidden_states=hidden_states,
+            cache_hidden=cache_hidden,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            past_key_value=None,
+            output_attentions=False,
+            use_cache=False,
+        )
+
+        # norm
+        hidden_states = self.norm(hidden_states)
+
+        return hidden_states
 
 
 EntryClass = [LlamaForCausalLMEagle3]
