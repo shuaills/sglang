@@ -1,8 +1,11 @@
+import json
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Optional, Tuple
 
 import torch
+from safetensors import safe_open
 from transformers import AutoTokenizer
 from transformers.cache_utils import DynamicCache
 
@@ -40,7 +43,6 @@ class EagleRunner:
 
     def __init__(self, base_model_path, draft_model_path):
         # TODO: support loading from the sgl-ealge lib
-        print(draft_model_path)
         self.base_model = (
             AutoModelForCausalLM.from_pretrained(
                 base_model_path, torch_dtype=torch.bfloat16
@@ -231,22 +233,57 @@ class OnlineEagleTrainer(EagleRunner):
 
 
 class OfflineEagleTrainer(EagleTrainer):
-    def __init__(self, draft_model, tokenizer):
+    def __init__(self, draft_model, base_path, tokenizer):
         self.draft_model = draft_model
         self.tokenizer = tokenizer
+        self._load_embedding_and_lm_head(base_path)
+
+        for param in self.embed_tokens.parameters():
+            param.requires_grad = False
+
+        self.draft_model.lm_head = self.draft_model.lm_head.bfloat16()
+
+    def _load_embedding_and_lm_head(self, base_model_path: str):
+        with open(
+            os.path.join(base_model_path, "model.safetensors.index.json"), "r"
+        ) as f:
+            index_json = json.loads(f.read())
+            emb_path = index_json["weight_map"][
+                "language_model.model.embed_tokens.weight"
+            ]
+            lm_head_path = index_json["weight_map"]["language_model.lm_head.weight"]
+        with safe_open(
+            os.path.join(base_model_path, emb_path), framework="pt", device="cpu"
+        ) as f:
+            tensor_slice = f.get_slice("language_model.model.embed_tokens.weight")
+            vocab_size, hidden_dim = tensor_slice.get_shape()
+            tensor_emb = tensor_slice[:, :hidden_dim].float()
+
+        with safe_open(
+            os.path.join(base_model_path, lm_head_path), framework="pt", device="cpu"
+        ) as f:
+            tensor_slice = f.get_slice("language_model.lm_head.weight")
+            vocab_size, hidden_dim = tensor_slice.get_shape()
+            tensor_lm_head = tensor_slice[:, :hidden_dim].float()
+
+        self.draft_model.lm_head.weight = torch.nn.Parameter(tensor_lm_head.cuda())
+        # 200018 is the padding token id for llama4
+        self.embed_tokens = torch.nn.Embedding(
+            vocab_size, hidden_dim, 200018, _weight=tensor_emb.cuda()
+        ).bfloat16()
 
     def step(
         self,
         hidden_states,
         input_ids,
-        attention_mask,
         target_hidden_states,
         loss_mask,
+        attention_mask: Optional[torch.Tensor] = None,
         ttt_length: int = 1,
     ) -> torch.Tensor:
 
         if ttt_length == 1:
-            self.step_naive(
+            return self.step_naive(
                 hidden_states=hidden_states,
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -262,16 +299,18 @@ class OfflineEagleTrainer(EagleTrainer):
         self,
         hidden_states: torch.Tensor,
         input_ids: torch.Tensor,
-        attention_mask: torch.Tensor,
         target_hidden_states: torch.Tensor,
         loss_mask: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
     ):
         """
         Naive step function is for ttt = 1
         """
+        with torch.no_grad():
+            input_embeds = self.embed_tokens(input_ids)
 
         output = self.draft_model(
-            input_ids=input_ids,
+            inputs_embeds=input_embeds,
             hidden_states=hidden_states,
             attention_mask=attention_mask,
         )
