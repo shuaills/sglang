@@ -2,11 +2,11 @@ import argparse
 import logging
 import os
 
-import wandb
 from torch.utils.data import DataLoader, DistributedSampler
 from tqdm import tqdm
 from transformers import AutoTokenizer
 
+import wandb
 from sgl_eagle import OfflineEagleTrainer
 from sgl_eagle.data.eagle_data_wrapper import (
     EagleDatasetWrapper,
@@ -143,7 +143,9 @@ def main():
 
             avg_train_loss = total_train_loss / len(train_loader)
 
-            logger.info(f"Epoch {epoch+1} Average Train Loss: {avg_train_loss:.4f}")
+            logger.info(
+                f"Epoch {epoch+1} Average Train Loss: {avg_train_loss:.4f} Train Loss: {loss.item():.4f}"
+            )
 
     logger.info(f"Training finished. Saving final model.")
     final_output_dir = os.path.join(config.train.output_dir, "final_model")
