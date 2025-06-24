@@ -327,6 +327,6 @@ class OfflineEagleTrainer(EagleTrainer):
         draft_logits = draft_logits.float()
         draft_p = torch.nn.LogSoftmax(dim=2)(draft_logits)
         plogp = target_p * draft_p
-        loss = -torch.sum(loss_mask * plogp, dim=-2).mean()
+        loss = -torch.sum(loss_mask * plogp, dim=2).mean()
 
         return loss
