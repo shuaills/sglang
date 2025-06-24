@@ -244,32 +244,31 @@ class OfflineEagleTrainer(EagleTrainer):
         self.draft_model.lm_head = self.draft_model.lm_head
 
     def _load_embedding_and_lm_head(self, base_model_path: str):
+        # TODO Each model implements its own LM head and embedding logic.
         with open(
             os.path.join(base_model_path, "model.safetensors.index.json"), "r"
         ) as f:
             index_json = json.loads(f.read())
-            emb_path = index_json["weight_map"][
-                "language_model.model.embed_tokens.weight"
-            ]
-            lm_head_path = index_json["weight_map"]["language_model.lm_head.weight"]
+            emb_path = index_json["weight_map"]["model.embed_tokens.weight"]
+            lm_head_path = index_json["weight_map"]["lm_head.weight"]
         with safe_open(
             os.path.join(base_model_path, emb_path), framework="pt", device="cpu"
         ) as f:
-            tensor_slice = f.get_slice("language_model.model.embed_tokens.weight")
+            tensor_slice = f.get_slice("model.embed_tokens.weight")
             vocab_size, hidden_dim = tensor_slice.get_shape()
             tensor_emb = tensor_slice[:, :hidden_dim].float()
 
         with safe_open(
             os.path.join(base_model_path, lm_head_path), framework="pt", device="cpu"
         ) as f:
-            tensor_slice = f.get_slice("language_model.lm_head.weight")
+            tensor_slice = f.get_slice("lm_head.weight")
             vocab_size, hidden_dim = tensor_slice.get_shape()
             tensor_lm_head = tensor_slice[:, :hidden_dim].float()
 
         self.draft_model.lm_head.weight = torch.nn.Parameter(tensor_lm_head.cuda())
         # 200018 is the padding token id for llama4
         self.embed_tokens = torch.nn.Embedding(
-            vocab_size, hidden_dim, 200018, _weight=tensor_emb.cuda()
+            vocab_size, hidden_dim, _weight=tensor_emb.cuda()
         )
 
     def step(

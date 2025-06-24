@@ -7,7 +7,6 @@ from torch.utils.data import DataLoader, DistributedSampler
 from tqdm import tqdm
 from transformers import AutoTokenizer
 
-import wandb
 from sgl_eagle import OfflineEagleTrainer
 from sgl_eagle.data.eagle_data_wrapper import (
     EagleDatasetWrapper,
@@ -45,10 +44,7 @@ def main():
     config = load_config(args.config)
 
     # TODO(yinfan98): only use rank 0 to log to wandb
-    wandb.init(
-        project=args.wandb_project,
-        name=args.wandb_run_name,
-    )
+
     logger.info("Wandb initialized.")
 
     # load draft model and tokenizer
@@ -92,8 +88,6 @@ def main():
         collate_fn=custom_eagle_collate_fn,
     )
 
-    wandb.watch(draft_model, log="all", log_freq=100)
-
     start_epoch = 0
     global_step = 0
 
@@ -113,20 +107,19 @@ def main():
 
             # move data to device
             hidden_states = data["hidden_state"].cuda()
-            hidden_states = hidden_states.permute(
-                0, 2, 1, 3
-            )  # [1, 3, 114, 5120] -> [1, 114, 3, 5120]
-            hidden_states = hidden_states.reshape(
-                1, -1, 15360
-            )  # [1, 114, 3, 5120] -> [1, 114, 15360]
 
+            ## baldealge data preprocess
+            hidden_states = hidden_states.squeeze(0)
+            seq_len = data["input_ids"].size(1)
+            max_len = min(2048, seq_len)
+            input_ids = data["input_ids"][:, :max_len].int().cuda()
+            loss_mask = data["loss_mask"][..., max_len].cuda()
             # make loss mask
-            loss_mask = data["loss_mask"][..., None].cuda()
 
             optimizer.zero_grad()
             loss = offline_trainer.step(
                 hidden_states=hidden_states,
-                input_ids=data["input_ids"].int().cuda(),
+                input_ids=input_ids,
                 target_hidden_states=data["target_hidden_states"].cuda(),
                 loss_mask=loss_mask,
             )
@@ -138,8 +131,6 @@ def main():
             total_train_loss += loss.item()
             train_pbar.set_postfix(loss=loss.item())
 
-            # wandb
-            wandb.log({"train/step_loss": loss.item(), "global_step": global_step})
             global_step += 1
 
             avg_train_loss = total_train_loss / len(train_loader)
@@ -153,7 +144,9 @@ def main():
     os.makedirs(final_output_dir, exist_ok=True)
 
     # 这样保存不会有 DictConfig 问题
-    torch.save(draft_model.state_dict(), os.path.join(final_output_dir, "pytorch_model.bin"))
+    torch.save(
+        draft_model.state_dict(), os.path.join(final_output_dir, "pytorch_model.bin")
+    )
 
 
 if __name__ == "__main__":
