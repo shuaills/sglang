@@ -7,6 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers import GenerationMixin, LlamaConfig, PreTrainedModel
 from transformers.activations import ACT2FN
+from transformers.models.llama.configuration_llama import LlamaConfig
 
 from ..utils import padding
 
@@ -526,11 +527,8 @@ class LlamaDecoderLayer(nn.Module):
 
         hidden_states = self.hidden_norm(hidden_states)
         input_emb = self.input_layernorm(input_emb)
-
+        print(input_emb.shape, hidden_states.shape)
         hidden_states = torch.cat((input_emb, hidden_states), dim=-1)
-
-        return_hidden = hidden_states
-
         # Self Attention
         hidden_states = self.self_attn(
             cache_hidden=cache_hidden,
@@ -555,6 +553,9 @@ class LlamaDecoderLayer(nn.Module):
 
 
 class LlamaForCausalLMEagle3(PreTrainedModel):
+
+    config_class = LlamaConfig
+
     def __init__(self, config, quant_config=None) -> None:
         super().__init__(config)
         self.config = config
@@ -578,11 +579,38 @@ class LlamaForCausalLMEagle3(PreTrainedModel):
             config.hidden_size, config.draft_vocab_size, bias=False
         )
 
+    def _prepare_decoder_attention_mask(
+        self, attention_mask, input_shape, inputs_embeds, past_key_values_length
+    ):
+        # create causal mask
+        # [bsz, seq_len] -> [bsz, 1, tgt_seq_len, src_seq_len]
+        combined_attention_mask = None
+        if input_shape[-1] > 1:
+            combined_attention_mask = _make_causal_mask(
+                input_shape,
+                inputs_embeds.dtype,
+                device=inputs_embeds.device,
+                past_key_values_length=past_key_values_length,
+            )
+
+        if attention_mask is not None:
+            # [bsz, seq_len] -> [bsz, 1, tgt_seq_len, src_seq_len]
+            expanded_attn_mask = _expand_mask(
+                attention_mask, inputs_embeds.dtype, tgt_len=input_shape[-1]
+            ).to(inputs_embeds.device)
+            combined_attention_mask = (
+                expanded_attn_mask
+                if combined_attention_mask is None
+                else expanded_attn_mask + combined_attention_mask
+            )
+
+        return combined_attention_mask
+
     def forward(
         self,
         hidden_states: torch.Tensor,
         inputs_embeds: torch.Tensor,
-        attention_mask: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
         ttt_length: int = 1,
     ):
         """
@@ -606,6 +634,15 @@ class LlamaForCausalLMEagle3(PreTrainedModel):
         device = hidden_states.device
         position_ids = torch.arange(0, seq_length, dtype=torch.long, device=device)
         position_ids = position_ids.unsqueeze(0).view(-1, seq_length)
+
+        # make attention mask
+        if attention_mask is None:
+            attention_mask = torch.ones(
+                (batch_size, seq_length), dtype=torch.bool, device=hidden_states.device
+            )
+        attention_mask = self._prepare_decoder_attention_mask(
+            attention_mask, (batch_size, seq_length), hidden_states, 0
+        )
 
         # fc
         hidden_states = self.fc(hidden_states)
