@@ -1,9 +1,16 @@
 base: ./common.yaml
 
+output_dir: /sgl-workspace/llama4_draft_17Bx16E
+
 data:
   train:
-    path: /sgl-workspace/sharegpt-eagle
+    path: /root/.cache/hidden_states_dump/1
     batch_size: 1
+
+train:
+  num_epochs: 1
+  num_workers: 2
+  max_len: 2048
 
 model:
   target:

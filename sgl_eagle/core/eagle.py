@@ -241,7 +241,7 @@ class OfflineEagleTrainer(EagleTrainer):
         for param in self.embed_tokens.parameters():
             param.requires_grad = False
 
-        self.draft_model.lm_head = self.draft_model.lm_head.bfloat16()
+        self.draft_model.lm_head = self.draft_model.lm_head
 
     def _load_embedding_and_lm_head(self, base_model_path: str):
         with open(
@@ -270,7 +270,7 @@ class OfflineEagleTrainer(EagleTrainer):
         # 200018 is the padding token id for llama4
         self.embed_tokens = torch.nn.Embedding(
             vocab_size, hidden_dim, 200018, _weight=tensor_emb.cuda()
-        ).bfloat16()
+        )
 
     def step(
         self,

@@ -6,3 +6,4 @@ setuptools
 deepspeed
 omegaconf
 tqdm
+wandb

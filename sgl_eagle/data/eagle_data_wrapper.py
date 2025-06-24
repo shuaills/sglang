@@ -29,7 +29,8 @@ def custom_eagle_collate_fn(batch):
 
 class EagleDatasetWrapper:
     def __init__(self, ds_path, max_len=2048):
-        chunk_dirs = [ds_path]
+        ds_list = []
+        chunk_dirs = [os.path.join(ds_path, d) for d in os.listdir(ds_path) if d.startswith("chunk_")]
         ds_list = [load_from_disk(chunk_dir) for chunk_dir in sorted(chunk_dirs)]
         self.ds = concatenate_datasets(ds_list)
         self.max_len = max_len

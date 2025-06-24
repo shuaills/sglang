@@ -2,6 +2,7 @@ import argparse
 import logging
 import os
 
+import torch
 from torch.utils.data import DataLoader, DistributedSampler
 from tqdm import tqdm
 from transformers import AutoTokenizer
@@ -73,7 +74,7 @@ def main():
 
     # TODO:(yinfan98): maybe problem here, move model to device
     logger.info("Moving draft model to device.")
-    draft_model = draft_model.cuda().bfloat16()
+    draft_model = draft_model.cuda()
 
     offline_trainer = OfflineEagleTrainer(
         draft_model, config.model.target.pretrained_model_name_or_path, tokenizer
@@ -111,7 +112,7 @@ def main():
         for batch_idx, data in enumerate(train_pbar):
 
             # move data to device
-            hidden_states = data["hidden_state"].bfloat16().cuda()
+            hidden_states = data["hidden_state"].cuda()
             hidden_states = hidden_states.permute(
                 0, 2, 1, 3
             )  # [1, 3, 114, 5120] -> [1, 114, 3, 5120]
@@ -126,12 +127,12 @@ def main():
             loss = offline_trainer.step(
                 hidden_states=hidden_states,
                 input_ids=data["input_ids"].int().cuda(),
-                target_hidden_states=data["target_hidden_states"].bfloat16().cuda(),
+                target_hidden_states=data["target_hidden_states"].cuda(),
                 loss_mask=loss_mask,
             )
 
             loss.backward()
-
+            torch.nn.utils.clip_grad_norm_(draft_model.parameters(), max_norm=0.5)
             optimizer.step()
 
             total_train_loss += loss.item()
@@ -148,13 +149,11 @@ def main():
             )
 
     logger.info(f"Training finished. Saving final model.")
-    final_output_dir = os.path.join(config.train.output_dir, "final_model")
+    final_output_dir = os.path.join(config.output_dir, "final_model")
     os.makedirs(final_output_dir, exist_ok=True)
-    draft_model.save_pretrained(final_output_dir)
-    tokenizer.save_pretrained(final_output_dir)
 
-    wandb.finish()
-    logger.info("Wandb run finished.")
+    # 这样保存不会有 DictConfig 问题
+    torch.save(draft_model.state_dict(), os.path.join(final_output_dir, "pytorch_model.bin"))
 
 
 if __name__ == "__main__":
