@@ -3,7 +3,7 @@ import asyncio
 import copy
 import os
 import re
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, wait
 
 import torch
 from datasets import Dataset, load_dataset
@@ -81,9 +81,9 @@ def format_conversation_ultrachat(row, dataset_column="messages"):
 
 
 if args.dataset == "sharegpt":
-    dataset = dataset.map(format_conversation_sharegpt)
+    dataset = dataset.map(format_conversation_sharegpt, num_proc=os.cpu_count())
 elif args.dataset == "ultrachat":
-    dataset = dataset.map(format_conversation_ultrachat)
+    dataset = dataset.map(format_conversation_ultrachat, num_proc=os.cpu_count())
 elif args.dataset == "mixture_of_thoughts":
     pass  # no need to format
 
@@ -136,7 +136,7 @@ def tokenize_conversation(row, tokenizer, col="messages"):
     }
 
 
-dataset = dataset.map(tokenize_conversation, fn_kwargs={"tokenizer": tokenizer})
+dataset = dataset.map(tokenize_conversation, fn_kwargs={"tokenizer": tokenizer}, num_proc=os.cpu_count())
 dataset = dataset.remove_columns(
     [
         col
@@ -163,18 +163,18 @@ low_layer_idx = 2
 mid_layer_idx = num_layers // 2
 high_layer_idx = num_layers - 3
 
-executor = ThreadPoolExecutor(max_workers=2)
-loop = asyncio.get_event_loop()
+executor = ProcessPoolExecutor(max_workers=40)
 save_tasks = []
 
 
-def save_dataset(dict_data, outdir, chunk_idx):
+def save_dataset(records, outdir, start, group_size):
+    if not records:
+        print("error ",start,group_size)
+        return
+    chunk_idx = start // group_size
+    dict_data = {k: [rec[k] for rec in records] for k in records[0]}
     ds = Dataset.from_dict(dict_data)
     ds.save_to_disk(f"{outdir}/chunk_{chunk_idx}")
-
-
-async def async_save_dataset(dict_data, outdir, chunk_idx):
-    await loop.run_in_executor(executor, save_dataset, dict_data, outdir, chunk_idx)
 
 
 records = []
@@ -206,13 +206,13 @@ for idx, row in tqdm(enumerate(dataset), total=args.end - args.start):
     records.append(data_point)
 
     if (idx + 1) % group_size == 0 or (idx + 1) == (args.end - args.start):
-        chunk_idx = start // group_size
-        dict_data = {k: [rec[k] for rec in records] for k in records[0]}
-        dict_data_copy = copy.deepcopy(dict_data)
         save_tasks.append(
-            asyncio.ensure_future(async_save_dataset(dict_data_copy, outdir, chunk_idx))
+            executor.submit(save_dataset, records.copy(), outdir, start, group_size)
         )
         records = []
 
 if save_tasks:
-    loop.run_until_complete(asyncio.gather(*save_tasks))
+    wait(save_tasks)
+
+executor.shutdown()
+
