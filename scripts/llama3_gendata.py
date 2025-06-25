@@ -1,6 +1,9 @@
 import argparse
+import asyncio
+import copy
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 
 import torch
 from datasets import Dataset, load_dataset
@@ -12,7 +15,7 @@ parser.add_argument("--start", type=int, default=0)
 parser.add_argument("--end", type=int, default=100)
 parser.add_argument("--index", type=int, default=1)
 parser.add_argument("--gpu_index", type=int, nargs="+", default=[0])
-parser.add_argument("--outdir", type=str, default="outdir0")
+parser.add_argument("--outdir", type=str, default="/root/.cache/llama3/outdir0")
 parser.add_argument(
     "--model_name", type=str, default="meta-llama/Meta-Llama-3.1-8B-Instruct"
 )  # "meta-llama/Meta-Llama-3.1-8B-Instruct"
@@ -24,7 +27,7 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
-os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu_index)[1:-1]
+# os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu_index)[1:-1]
 
 max_token_length = 2048
 
@@ -160,8 +163,22 @@ low_layer_idx = 2
 mid_layer_idx = num_layers // 2
 high_layer_idx = num_layers - 3
 
+executor = ThreadPoolExecutor(max_workers=2)
+loop = asyncio.get_event_loop()
+save_tasks = []
+
+
+def save_dataset(dict_data, outdir, chunk_idx):
+    ds = Dataset.from_dict(dict_data)
+    ds.save_to_disk(f"{outdir}/chunk_{chunk_idx}")
+
+
+async def async_save_dataset(dict_data, outdir, chunk_idx):
+    await loop.run_in_executor(executor, save_dataset, dict_data, outdir, chunk_idx)
+
+
 records = []
-group_size = 400
+group_size = 100
 
 for idx, row in tqdm(enumerate(dataset), total=args.end - args.start):
     start = (idx // group_size) * group_size
@@ -174,6 +191,7 @@ for idx, row in tqdm(enumerate(dataset), total=args.end - args.start):
             row["input_ids"].unsqueeze(0)[:, :max_token_length].cuda(),
             output_hidden_states=True,
         )
+
         low_layer = outputs.hidden_states[low_layer_idx].cpu()
         mid_layer = outputs.hidden_states[mid_layer_idx].cpu()
         high_layer = outputs.hidden_states[high_layer_idx].cpu()
@@ -187,10 +205,14 @@ for idx, row in tqdm(enumerate(dataset), total=args.end - args.start):
     }
     records.append(data_point)
 
-    # 每group_size条保存一次
     if (idx + 1) % group_size == 0 or (idx + 1) == (args.end - args.start):
         chunk_idx = start // group_size
         dict_data = {k: [rec[k] for rec in records] for k in records[0]}
-        ds = Dataset.from_dict(dict_data)
-        ds.save_to_disk(f"{outdir}/chunk_{chunk_idx}")
+        dict_data_copy = copy.deepcopy(dict_data)
+        save_tasks.append(
+            asyncio.ensure_future(async_save_dataset(dict_data_copy, outdir, chunk_idx))
+        )
         records = []
+
+if save_tasks:
+    loop.run_until_complete(asyncio.gather(*save_tasks))

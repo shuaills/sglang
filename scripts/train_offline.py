@@ -113,7 +113,7 @@ def main():
             seq_len = data["input_ids"].size(1)
             max_len = min(2048, seq_len)
             input_ids = data["input_ids"][:, :max_len].int().cuda()
-            loss_mask = data["loss_mask"][..., max_len].cuda()
+            loss_mask = data["loss_mask"][:, :max_len, None].cuda()
             # make loss mask
 
             optimizer.zero_grad()

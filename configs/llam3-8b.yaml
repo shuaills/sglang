@@ -3,9 +3,14 @@ base: ./common.yaml
 
 output_dir: /sgl-workspace/llama3_draft
 
+train:
+  num_epochs: 1
+  num_workers: 2
+  max_len: 2048
+
 data:
   train:
-    path: /sgl-workspace/BaldEagle/outdir0/1/
+    path: /root/.cache/llama3/outdir0/1/
     batch_size: 1
 
 model:
