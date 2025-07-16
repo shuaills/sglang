@@ -96,6 +96,7 @@ class Conversation:
     audio_data: Optional[List[str]] = None
 
     def get_prompt(self) -> str:
+        print(self.sep_style)
         """Get the prompt for generation."""
         system_prompt = self.system_template.format(system_message=self.system_message)
         if self.sep_style == SeparatorStyle.ADD_COLON_SINGLE:
@@ -451,7 +452,9 @@ def get_conv_template_by_model_path(model_path):
     for matching_func in matching_function_registry:
         conv_name = matching_func(model_path)
         if conv_name is not None:
+            print(conv_name)
             return conv_name
+    print("not find")
     return None
 
 

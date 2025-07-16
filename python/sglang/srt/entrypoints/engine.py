@@ -807,7 +807,6 @@ def _launch_subprocesses(
                 "Initialization failed. Please see the error messages above."
             )
         scheduler_infos.append(data)
-
     # Assume all schedulers have the same scheduler_info
     scheduler_info = scheduler_infos[0]
     tokenizer_manager.max_req_input_len = scheduler_info["max_req_input_len"]
