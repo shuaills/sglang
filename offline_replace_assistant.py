@@ -21,6 +21,7 @@ import sglang as sgl
 from sglang.srt.conversation import chat_templates, get_conv_template_by_model_path
 from sglang.srt.server_args import ServerArgs
 from tqdm import tqdm
+from transformers import AutoTokenizer
 
 # Suppress SGLang INFO logs to reduce noise
 logging.getLogger("sglang").setLevel(logging.WARNING)
@@ -61,42 +62,120 @@ class InferenceEngine:
         self.engine.shutdown()
 
 
+def build_conversation_prompt(
+    messages: List[Dict[str, Any]], 
+    tokenizer, 
+    server_args: ServerArgs
+) -> str:
+    """
+    Build conversation prompt using HF tokenizer first, fallback to SGLang templates.
+    """
+    # Convert message format to OpenAI standard
+    standardized_messages = []
+    
+    for msg in messages:
+        role = msg.get("from") or msg.get("role")
+        content = msg.get("value") or msg.get("content")
+        
+        # Standardize role names
+        if role in {"human", "user"}:
+            role = "user"
+        elif role in {"gpt", "assistant"}:
+            role = "assistant"
+        elif role == "system":
+            role = "system"
+        else:
+            continue  # Skip unknown roles
+            
+        if content is not None:
+            standardized_messages.append({"role": role, "content": str(content)})
+    
+    # Method 1: Try using HF tokenizer's native chat template (recommended)
+    try:
+        if hasattr(tokenizer, 'chat_template') and tokenizer.chat_template is not None:
+            prompt = tokenizer.apply_chat_template(
+                standardized_messages,
+                tokenize=False,
+                add_generation_prompt=True
+            )
+            return prompt
+    except Exception as e:
+        print(f"⚠ HF chat template failed: {e}, falling back to SGLang template")
+    
+    # Method 2: Fallback to SGLang's template system
+    chat_template_name = server_args.chat_template
+    if chat_template_name is None:
+        chat_template_name = get_conv_template_by_model_path(server_args.model_path)
+        if chat_template_name is None:
+            # Last resort: use 'llama3' as default
+            chat_template_name = "llama3"
+            
+    print(f"⚠ Using SGLang template: {chat_template_name}")
+    conv = chat_templates[chat_template_name].copy()
+    
+    # Ensure conv.roles has at least 2 elements
+    if len(conv.roles) < 2:
+        raise ValueError(f"Invalid conversation template {chat_template_name}: roles must have at least 2 elements")
+    
+    for msg in standardized_messages:
+        if msg["role"] == "user":
+            conv.append_message(conv.roles[0], msg["content"])
+        elif msg["role"] == "assistant":
+            conv.append_message(conv.roles[1], msg["content"])
+        elif msg["role"] == "system":
+            conv.system_message = msg["content"]
+    
+    # Add generation prompt for assistant
+    conv.append_message(conv.roles[1], "")
+    
+    return conv.get_prompt()
+
+
 async def _process_conversation(
     data: Dict[str, Any],
     engine: InferenceEngine,
     server_args: ServerArgs,
     sampling_params: Dict[str, Any],
+    tokenizer,
     pbar: tqdm,
 ) -> Dict[str, Any]:
     """Generate assistant replies for a single conversation."""
     try:
         messages: List[Dict[str, Any]] = data.get("conversations") or data.get("messages")
-        if messages is None:
+        if messages is None or len(messages) == 0:
             return data
 
-        # Handle None chat_template by using model path fallback
-        chat_template_name = server_args.chat_template
-        if chat_template_name is None:
-            chat_template_name = get_conv_template_by_model_path(server_args.model_path)
-            if chat_template_name is None:
-                # Last resort: use 'llama3' as default
-                chat_template_name = "llama3"
+        # Build conversation up to the last user message
+        # We'll regenerate all assistant responses
+        conversation_messages = []
         
-        conv = chat_templates[chat_template_name].copy()
-
-        for msg in messages:
+        for i, msg in enumerate(messages):
             role = msg.get("from") or msg.get("role")
             content = msg.get("value") or msg.get("content")
+            
             if role in {"human", "user"}:
-                conv.append_message(conv.roles[0], content)
-            else:
-                conv.append_message(conv.roles[1], None)
-                text = await engine.generate(conv.get_prompt(), sampling_params)
-                conv.update_last_message(text)
-                if "value" in msg:
-                    msg["value"] = text
-                else:
-                    msg["content"] = text
+                conversation_messages.append({"role": "user", "content": content})
+                
+                # Generate assistant response
+                prompt = build_conversation_prompt(conversation_messages, tokenizer, server_args)
+                text = await engine.generate(prompt, sampling_params)
+                
+                # Update the original message data
+                next_idx = i + 1
+                if next_idx < len(messages):
+                    next_msg = messages[next_idx]
+                    if next_msg.get("from") in {"gpt", "assistant"} or next_msg.get("role") == "assistant":
+                        if "value" in next_msg:
+                            next_msg["value"] = text
+                        else:
+                            next_msg["content"] = text
+                
+                # Add to conversation history for next turn
+                conversation_messages.append({"role": "assistant", "content": text})
+        
+        return data
+    except Exception as e:
+        print(f"Error processing conversation: {e}")
         return data
     finally:
         # Update progress bar for each completed conversation
@@ -109,6 +188,22 @@ async def run(
     output_path: str,
     batch_size: int,
 ) -> None:
+    # Load tokenizer for chat template
+    print(f"Loading tokenizer from {server_args.model_path}...")
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(
+            server_args.model_path, 
+            trust_remote_code=True
+        )
+        print(f"✓ Tokenizer loaded successfully")
+        if hasattr(tokenizer, 'chat_template') and tokenizer.chat_template:
+            print(f"✓ Found HF chat template in tokenizer")
+        else:
+            print(f"⚠ No HF chat template found, will use SGLang templates")
+    except Exception as e:
+        print(f"⚠ Failed to load tokenizer: {e}, will use SGLang templates only")
+        tokenizer = None
+
     engine = InferenceEngine(**dataclasses.asdict(server_args))
     sampling_params = {"temperature": 0.8, "top_p": 0.95}
 
@@ -126,7 +221,7 @@ async def run(
         pbar.set_postfix_str(f"Batch {batch_num}, Size: {len(batch)}")
         tasks = [
             asyncio.create_task(
-                _process_conversation(item, engine, server_args, sampling_params, pbar)
+                _process_conversation(item, engine, server_args, sampling_params, tokenizer, pbar)
             )
             for item in batch
         ]
