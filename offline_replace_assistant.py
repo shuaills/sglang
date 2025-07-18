@@ -205,7 +205,7 @@ async def run(
         tokenizer = None
 
     engine = InferenceEngine(**dataclasses.asdict(server_args))
-    sampling_params = {"temperature": 0.8, "top_p": 0.95}
+    sampling_params = {"max_new_tokens": 2048}
 
     print("Counting total conversations...")
     total_lines = 0
@@ -264,7 +264,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=2048,
+        default=128,
         help="Number of conversations to process concurrently",
     )
     ServerArgs.add_cli_args(parser)
