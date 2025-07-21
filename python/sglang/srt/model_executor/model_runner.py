@@ -291,11 +291,11 @@ class ModelRunner:
         self.num_effective_layers = self.end_layer - self.start_layer
 
         if (
-            self.server_args.return_hidden_state_layers
+            self.server_args.return_eagle3_hidden_state
             and self.server_args.enable_return_hidden_states
             and not self.server_args.speculative_algorithm
         ):
-            self._set_hidden_state_layers(self.server_args.return_hidden_state_layers)
+            self._set_hidden_state_layers(self.server_args.return_eagle3_hidden_state)
 
         # Apply torchao quantization
         torchao_applied = getattr(self.model, "torchao_applied", False)
@@ -331,7 +331,7 @@ class ModelRunner:
 
         # auxiliary hidden capture mode
         if (
-            not self.server_args.return_hidden_state_layers
+            not self.server_args.return_eagle3_hidden_state
             and self.spec_algorithm.is_eagle3()
             and not self.is_draft_worker
         ):
@@ -702,7 +702,7 @@ class ModelRunner:
                 layers = [int(x) for x in layer_str.split(",") if x.strip()]
         except Exception as e:
             raise ValueError(
-                f"Invalid format for return_hidden_state_layers: {layer_str}"
+                f"Invalid format for return_eagle3_hidden_state: {layer_str}"
             ) from e
         self.model.capture_aux_hidden_states = True
         self.model.model.layers_to_capture = layers

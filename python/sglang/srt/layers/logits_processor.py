@@ -241,8 +241,6 @@ class LogitsProcessor(nn.Module):
         else:
             hd_to_return = [hidden_states]
 
-        aux_hidden_states = None
-
         if isinstance(logits_metadata, ForwardBatch):
             logits_metadata = LogitsMetadata.from_forward_batch(logits_metadata)
         # Get the last hidden states and last logits for the next token prediction

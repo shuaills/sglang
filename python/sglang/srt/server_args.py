@@ -237,7 +237,7 @@ class ServerArgs:
     disable_chunked_prefix_cache: bool = False
     disable_fast_image_processor: bool = False
     enable_return_hidden_states: bool = False
-    return_hidden_state_layers: Optional[str] = None
+    return_eagle3_hidden_state: Optional[str] = None
     enable_triton_kernel_moe: bool = False
 
     # Debug tensor dumps
@@ -1648,10 +1648,10 @@ class ServerArgs:
             help="Enable returning hidden states with responses.",
         )
         parser.add_argument(
-            "--return-hidden-state-layers",
+            "--return-eagle3-hidden-state",
             type=str,
-            default=ServerArgs.return_hidden_state_layers,
-            help="Comma separated layer indices to return hidden states from, or 'all' for all layers.",
+            default=ServerArgs.return_eagle3_hidden_state,
+            help="Comma separated layer indices to return eagle3 hidden states, or 'all' for all layers.",
         )
         parser.add_argument(
             "--enable-triton-kernel-moe",
