@@ -238,3 +238,6 @@ compile_commands.json
 Cargo.lock
 
 lmms-eval
+
+# Test environments
+sglang_test_env/

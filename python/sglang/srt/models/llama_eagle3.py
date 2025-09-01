@@ -115,6 +115,14 @@ class LlamaModel(nn.Module):
             config.hidden_size,
             prefix=add_prefix("embed_tokens", prefix),
         )
+        
+        # Add embedding projection layer if needed
+        if hasattr(config, "target_hidden_size") and config.target_hidden_size != config.hidden_size:
+            self.embedding_proj = torch.nn.Linear(
+                config.target_hidden_size,
+                config.hidden_size,
+                bias=False,
+            )
 
         if hasattr(config, "target_hidden_size"):
             self.hidden_size_in = config.target_hidden_size
@@ -143,6 +151,10 @@ class LlamaModel(nn.Module):
             embeds = self.embed_tokens(input_ids)
         else:
             embeds = input_embeds
+            
+        # Apply embedding projection if available
+        if hasattr(self, 'embedding_proj'):
+            embeds = self.embedding_proj(embeds)
 
         hidden_states = forward_batch.spec_info.hidden_states
         if hidden_states.shape[-1] != embeds.shape[-1]:
