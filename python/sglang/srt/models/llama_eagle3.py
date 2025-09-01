@@ -110,9 +110,11 @@ class LlamaModel(nn.Module):
         super().__init__()
         self.config = config
         self.vocab_size = config.vocab_size
+        # Use target model's embedding dimensions for shared embeddings
+        embedding_dim = getattr(config, "target_hidden_size", config.hidden_size)
         self.embed_tokens = VocabParallelEmbedding(
             config.vocab_size,
-            config.hidden_size,
+            embedding_dim,
             prefix=add_prefix("embed_tokens", prefix),
         )
         
@@ -260,6 +262,14 @@ class LlamaForCausalLMEagle3(LlamaForCausalLM):
 
     def get_hot_token_id(self):
         return self.hot_token_id
+
+    def set_embed(self, embed):
+        # Override to allow embedding sharing even with dimension mismatch
+        # The projection layer will handle dimension alignment
+        del self.model.embed_tokens.weight
+        self.model.embed_tokens.weight = embed
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
 
 
 EntryClass = [LlamaForCausalLMEagle3]
